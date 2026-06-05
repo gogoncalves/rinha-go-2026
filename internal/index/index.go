@@ -76,16 +76,26 @@ func Open(path string) (*Index, error) {
 	if size < HeaderSize {
 		return nil, errors.New("index too small")
 	}
-	data, err := unix.Mmap(int(f.Fd()), 0, size, unix.PROT_READ, unix.MAP_PRIVATE)
+	// MAP_POPULATE pre-faults the index into RAM during Open so the first
+	// requests don't pay TLB/page-fault tax. Combined with mlockall this can
+	// blow the 165MB cgroup; default off, opt-in via INDEX_MAP_POPULATE=1.
+	// Falls back to plain MAP_PRIVATE on kernels that reject the flag.
+	mmapFlags := unix.MAP_PRIVATE
+	if os.Getenv("INDEX_MAP_POPULATE") == "1" {
+		mmapFlags |= mapPopulate
+	}
+	data, err := unix.Mmap(int(f.Fd()), 0, size, unix.PROT_READ, mmapFlags)
 	if err != nil {
-		return nil, err
+		data, err = unix.Mmap(int(f.Fd()), 0, size, unix.PROT_READ, unix.MAP_PRIVATE)
+		if err != nil {
+			return nil, err
+		}
 	}
 	_ = unix.Madvise(data, unix.MADV_WILLNEED)
-	_ = unix.Madvise(data, unix.MADV_RANDOM)
-	// MADV_HUGEPAGE = 14 — reduce TLB misses on hot mmap region. Opt-in via
-	// env: forcing THP on a ~95MB private+mlocked mapping can inflate the
-	// cgroup RSS enough to OOM at 140MiB. Default off; set
-	// INDEX_HUGEPAGE=1 when running with a larger memory budget.
+	// MADV_HUGEPAGE drops TLB misses on the hot mmap region. Opt-in: forcing
+	// THP rounds the ~95MB mapping up to 96MB and inflates RSS toward the
+	// 165MB cgroup ceiling. Default off; flip INDEX_HUGEPAGE=1 when the
+	// memory budget has slack.
 	if os.Getenv("INDEX_HUGEPAGE") == "1" {
 		_ = madviseHugepage(data)
 	}

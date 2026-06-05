@@ -1,0 +1,4 @@
+bin/
+*.o
+*.bin
+index_go.bin

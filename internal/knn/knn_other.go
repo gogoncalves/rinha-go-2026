@@ -4,6 +4,12 @@ package knn
 
 import idx "rinha-go/internal/index"
 
+func bboxLowerBoundFast(q *[idx.PADDED_DIMS]int16, ix *idx.Index, cluster uint32) int64 {
+	return bboxLowerBound(q, ix, cluster)
+}
+
+func prefetchBlock(vectors []int16, blockIdx int) {}
+
 func blkDist(vectors []int16, blockIdx int, q *[idx.PADDED_DIMS]int16) [idx.LANES]int64 {
 	blockBase := blockIdx * PADDED * LANES
 	var acc0, acc1 [LANES]int64

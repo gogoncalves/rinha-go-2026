@@ -147,7 +147,7 @@ func repairFull(ix *idx.Index, q *[PADDED]int16, probes []Probe, bestD *[TopK]in
 		if (seenMask[w]>>b)&1 != 0 {
 			continue
 		}
-		lb := bboxLowerBound(q, ix, ci)
+		lb := bboxLowerBoundFast(q, ix, ci)
 		if lb >= bestD[TopK-1] {
 			continue
 		}
@@ -161,7 +161,7 @@ func repairFast(ix *idx.Index, q *[PADDED]int16, probes []Probe, bestD *[TopK]in
 		if p.Cluster == maxU32 {
 			break
 		}
-		lb := bboxLowerBound(q, ix, p.Cluster)
+		lb := bboxLowerBoundFast(q, ix, p.Cluster)
 		if lb >= bestD[TopK-1] {
 			continue
 		}
@@ -185,8 +185,22 @@ func scanCluster(ix *idx.Index, q *[PADDED]int16, cluster uint32, bestD *[TopK]i
 	if total == 0 {
 		return
 	}
+	// Prime L1d with the next 4 blocks (256B each = 4 cache lines per block).
+	// Mirrors bmtec/piassa/Mojo ahead=4 prefetch. With block size 256B and
+	// Haswell L1d=32KiB, ahead=4 keeps the loaded working set well within
+	// reach while hiding the ~12-cycle L2 latency on each VMOVDQU.
+	for p := 0; p < 4; p++ {
+		nb := startBlock + p
+		if nb >= endBlock {
+			break
+		}
+		prefetchBlock(ix.Vectors, nb)
+	}
 	var processed uint32
 	for blk := startBlock; blk < endBlock; blk++ {
+		if ahead := blk + 4; ahead < endBlock {
+			prefetchBlock(ix.Vectors, ahead)
+		}
 		threshold := bestD[TopK-1]
 		dists, pruned := blkDistPrune(ix.Vectors, blk, q, threshold)
 		laneN := uint32(LANES)

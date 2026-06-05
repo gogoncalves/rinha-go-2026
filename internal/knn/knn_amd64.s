@@ -274,3 +274,52 @@ pair5p:
 	VZEROUPPER
 	MOVL AX, ret+40(FP)
 	RET
+
+// func bboxLowerBoundAVX2(mn *int16, mx *int16, q *int16) int64
+// Computes sum-of-squared gaps between q and the [mn,mx] box across PADDED=16
+// i16 dims using one 256-bit pass. gap = max(max(mn-q,0), max(q-mx,0)).
+// VPMADDWD gives 8 i32 lane sums; we widen to 8 i64 and horizontal-add.
+TEXT ·bboxLowerBoundAVX2(SB), NOSPLIT, $0-32
+	MOVQ mn+0(FP), AX
+	MOVQ mx+8(FP), BX
+	MOVQ q+16(FP), CX
+
+	VMOVDQU (AX), Y0                // mn (16 i16)
+	VMOVDQU (BX), Y1                // mx
+	VMOVDQU (CX), Y2                // q
+
+	VPSUBW Y2, Y0, Y3               // below_diff = mn - q
+	VPSUBW Y1, Y2, Y4               // above_diff = q - mx
+	VPXOR Y5, Y5, Y5
+	VPMAXSW Y5, Y3, Y3              // max(below_diff, 0)
+	VPMAXSW Y5, Y4, Y4              // max(above_diff, 0)
+	VPMAXSW Y4, Y3, Y3              // gap = max(below, above) (only one side is positive per lane)
+	VPMADDWD Y3, Y3, Y3             // 8 i32 = pair-sum of squares
+
+	// widen 8 i32 -> 8 i64, sum to one scalar
+	VPMOVSXDQ X3, Y6                // low 4 i32 -> 4 i64
+	VEXTRACTI128 $1, Y3, X7
+	VPMOVSXDQ X7, Y7                // high 4 i32 -> 4 i64
+	VPADDQ Y7, Y6, Y6               // 4 i64
+	VEXTRACTI128 $1, Y6, X7
+	VPADDQ X7, X6, X6               // 2 i64
+	VPSHUFD $0x4E, X6, X7           // swap hi/lo 64-bit lanes
+	VPADDQ X7, X6, X6               // 1 i64
+	VMOVQ X6, AX
+	VZEROUPPER
+	MOVQ AX, ret+24(FP)
+	RET
+
+// func prefetchBlockT0(vectors *int16, blockIdx int)
+// Issues PREFETCHT0 on the 4 cache lines (256B) of one block. Used to prime
+// L1d ahead of the scanCluster block loop (ahead=4).
+TEXT ·prefetchBlockT0(SB), NOSPLIT, $0-16
+	MOVQ vectors+0(FP), SI
+	MOVQ blockIdx+8(FP), AX
+	SHLQ $8, AX                     // blockIdx * 256
+	ADDQ AX, SI
+	PREFETCHT0 0(SI)
+	PREFETCHT0 64(SI)
+	PREFETCHT0 128(SI)
+	PREFETCHT0 192(SI)
+	RET

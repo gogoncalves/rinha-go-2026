@@ -37,6 +37,10 @@ var (
 func main() {
 	runtime.GOMAXPROCS(1)
 
+	// Tighten scheduler timer slack and try SCHED_FIFO before we open the
+	// index, so the warmup loop already runs at the lower jitter.
+	applyLowLatencyTuning()
+
 	indexPath := envOr("INDEX_PATH", "/data/index.bin")
 	ix, err := idx.Open(indexPath)
 	if err != nil {
@@ -49,7 +53,11 @@ func main() {
 		}
 	}
 
-	warmup(ix, 700*time.Millisecond)
+	// Self-warmup primes caches/TLB before we accept any traffic. Configurable
+	// via WARMUP_MS. Default 700ms matches v10; throttled cgroups make longer
+	// warmups stall the LB connect handshake long enough to break the harness.
+	warmupMs := envInt("WARMUP_MS", 700)
+	warmup(ix, time.Duration(warmupMs)*time.Millisecond)
 
 	if ctrl := os.Getenv("CTRL_SOCK_PATH"); ctrl != "" {
 		runCtrl(ix, ctrl)
@@ -163,6 +171,18 @@ func envOr(k, d string) string {
 	return v
 }
 
+func envInt(k string, d int) int {
+	v := os.Getenv(k)
+	if v == "" {
+		return d
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return d
+	}
+	return n
+}
+
 func mlockEnabled() bool {
 	v := os.Getenv("MLOCK")
 	if v == "" {
@@ -171,7 +191,6 @@ func mlockEnabled() bool {
 	return v != "0"
 }
 
-var _ = strconv.Atoi
 var _ = errors.Is
 var _ = io.EOF
 var _ = rand.Int

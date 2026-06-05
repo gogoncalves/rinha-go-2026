@@ -1,6 +1,6 @@
 services:
   api1:
-    image: gugagoncalves/rinha-2026-go:v11
+    image: gugagoncalves/rinha-2026-go:v10
     platform: linux/amd64
     cpuset: "0"
     logging:
@@ -23,11 +23,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.49"
+          cpus: "0.35"
           memory: "165MB"
 
   api2:
-    image: gugagoncalves/rinha-2026-go:v11
+    image: gugagoncalves/rinha-2026-go:v10
     platform: linux/amd64
     cpuset: "1"
     logging:
@@ -50,11 +50,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.49"
+          cpus: "0.35"
           memory: "165MB"
 
   lb:
-    image: gugagoncalves/rinha-2026-go:v11
+    image: gugagoncalves/rinha-2026-go:v10
     platform: linux/amd64
     cpuset: "2,3"
     entrypoint: ["/lb"]
@@ -79,7 +79,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.02"
+          cpus: "0.30"
           memory: "20MB"
 
 volumes:
